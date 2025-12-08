@@ -47,10 +47,23 @@ class ConversationAgent:
 
 
 
+    def terminal_user_interface(self):
+        while True:
+            user_interaction = input("Vous : ")
+            if user_interaction.lower() == "exit":
+                break
+            elif user_interaction == "":
+                print("Jarvis : Vous n'avez rien à dire ?")
+            else:
+                response = self.ask_llm(user_interaction=user_interaction)
+                print(f"Jarvis : {response}")
+
+
+
+
+
+
+
 if __name__ == "__main__":
     conversation_agent = ConversationAgent()
-    conversation_agent.ask_llm(user_interaction="Quel âge as-tu ?")
-    print(conversation_agent.history)
-    print('-----')
-    conversation_agent.ask_llm(user_interaction="Quelle était ma première question ?")
-    print(conversation_agent.history)
+    conversation_agent.terminal_user_interface()
