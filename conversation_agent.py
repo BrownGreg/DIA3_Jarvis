@@ -32,6 +32,46 @@ class ConversationAgent:
                 })
 
 
+    def stt_audio_to_text(
+        self,
+        audio_file_path: str,
+        model: str = "whisper/whisper-large-v3",
+        language: str = "fr",
+        prompt: str | None = None,
+    ) -> str:
+        with open(audio_file_path, "rb") as audio_file:
+            transcription = self.client.audio.transcriptions.create(
+                file=audio_file,
+                model=model,
+                response_format="json",
+                language=language,
+                temperature=0.0,
+                prompt=prompt,
+            )
+
+        return transcription.text
+
+
+    def ask_llm_from_audio(
+        self,
+        audio_file_path: str,
+        model: str,
+        stt_model: str = "whisper/whisper-large-v3",
+        language: str = "fr",
+    ) -> str:
+
+        user_text = self.stt_audio_to_text(
+            audio_file_path=audio_file_path,
+            model=stt_model,
+            language=language,
+        )
+
+        return self.ask_llm(
+            user_interaction=user_text,
+            model=model
+        )
+
+
     def ask_llm(self, user_interaction, model):
 
         self.update_history(role="user", content=user_interaction)

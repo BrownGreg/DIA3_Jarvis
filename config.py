@@ -4,4 +4,5 @@ LLM_MODELS = [
 	"openai/gpt-oss-120b",
 	"llama-3.3-70b-versatile",
 	"moonshotai/kimi-k2-instruct-0905",
+    "whisper/whisper-large-v3",
 ]
