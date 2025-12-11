@@ -50,6 +50,7 @@ class ConversationAgent:
         )
         return (transcription.text or "").strip()
 
+    # ========= Pipeline : audio -> texte -> LLM =========
     def ask_llm_from_audio(
         self,
         audio_bytes: bytes,
