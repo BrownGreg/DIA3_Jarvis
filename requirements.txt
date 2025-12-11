@@ -1,5 +1,6 @@
 streamlit
 groq
 python-dotenv
-streamlit
 discord.py
+pydub
+google-cloud-texttospeech
