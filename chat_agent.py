@@ -1,13 +1,15 @@
 import os
 from typing import Generator
 from io import BytesIO
+import io
+import wave
 import re
 import base64
 from pydub import AudioSegment
 
 from groq import Groq
 from google.cloud import texttospeech
-from config import LLM_MODELS, VISION_MODELS, STT_MODEL, LLM_MODEL, TTS_LANGUAGE_CODE, TTS_VOICE_NAME, TTS_AUDIO_ENCODING
+from config import LLM_MODELS, VISION_MODELS, STT_MODEL, LLM_MODEL, TTS_LANGUAGE_CODE, TTS_VOICE_NAME, TTS_AUDIO_ENCODING, PERSONAS
 
 from dotenv import load_dotenv
 
@@ -33,6 +35,15 @@ class ConversationAgent:
         # Laisse les attributs LLM/Vision de l'ancienne version pour ne pas casser frontend.py
         self.large_language_model = LLM_MODELS[0]
         self.vision_model = VISION_MODELS[0]
+        # TTS persona settings (can be overridden by frontend)
+        default_persona = PERSONAS.get("Jarvis", {})
+        self.persona_name = default_persona.get("display_name", "Jarvis")
+        self.persona_context = default_persona.get("context", ConversationAgent.read_file("./context.txt"))
+        self.tts_language_code = default_persona.get("tts_language_code", TTS_LANGUAGE_CODE)
+        self.tts_voice_name = default_persona.get("tts_voice_name", TTS_VOICE_NAME)
+        self.gemini_voice = default_persona.get("gemini_voice", None)
+        self.gemini_locale = default_persona.get("gemini_locale", None)
+        self.gemini_model = default_persona.get("gemini_model", None)
 
     @staticmethod
     def read_file(file_path: str) -> str:
@@ -138,8 +149,8 @@ class ConversationAgent:
         synthesis_input = texttospeech.SynthesisInput(text=text)
 
         voice = texttospeech.VoiceSelectionParams(
-            language_code=TTS_LANGUAGE_CODE,
-            name=TTS_VOICE_NAME
+            language_code=getattr(self, 'tts_language_code', TTS_LANGUAGE_CODE),
+            name=getattr(self, 'tts_voice_name', TTS_VOICE_NAME)
         )
 
         audio_encoding = texttospeech.AudioEncoding.MP3 if TTS_AUDIO_ENCODING == "MP3" else texttospeech.AudioEncoding.LINEAR16
@@ -161,6 +172,190 @@ class ConversationAgent:
                 audio_file.write(response.audio_content)
 
         return response.audio_content
+
+    def speak_stream(self, text: str) -> Generator[bytes, None, None]:
+        """Génère un flux audio (TTS) en streaming via Google Cloud StreamingSynthesize.
+
+        Yield des chunks `bytes` contenant `audio_content` au fur et à mesure.
+        Utile pour la lecture temps réel côté front-end.
+        """
+        # Prépare les paramètres de voix et de sortie
+        voice = texttospeech.VoiceSelectionParams(
+            language_code=getattr(self, 'tts_language_code', TTS_LANGUAGE_CODE),
+            name=getattr(self, 'tts_voice_name', TTS_VOICE_NAME),
+        )
+
+        audio_encoding = texttospeech.AudioEncoding.MP3 if TTS_AUDIO_ENCODING == "MP3" else texttospeech.AudioEncoding.LINEAR16
+
+        # Configuration de streaming — l'API streaming n'accepte pas "audio_config" directement
+        # Actuellement l'API streaming n'autorise que les voix Chirp 3 HD. Si la voix
+        # configurée n'est pas une voix Chirp, on bascule vers un fallback Chirp HD.
+        configured_voice_name = (getattr(self, 'tts_voice_name', TTS_VOICE_NAME) or "")
+        if "chirp" in configured_voice_name.lower():
+            streaming_voice_name = configured_voice_name
+            streaming_language = getattr(self, 'tts_language_code', TTS_LANGUAGE_CODE)
+        else:
+            streaming_voice_name = "en-US-Chirp3-HD-Charon"
+            streaming_language = "en-US"
+
+        streaming_voice = texttospeech.VoiceSelectionParams(
+            language_code=streaming_language,
+            name=streaming_voice_name,
+        )
+
+        streaming_config = texttospeech.StreamingSynthesizeConfig(
+            voice=streaming_voice,
+        )
+
+        # Premier message: la configuration
+        config_request = texttospeech.StreamingSynthesizeRequest(
+            streaming_config=streaming_config
+        )
+
+        # Générateur de requêtes: d'abord la config, puis le texte
+        def request_generator():
+            yield config_request
+            yield texttospeech.StreamingSynthesizeRequest(
+                input=texttospeech.StreamingSynthesisInput(text=text)
+            )
+
+        # Appel streaming
+        streaming_responses = self.tts_client.streaming_synthesize(request_generator())
+
+        for response in streaming_responses:
+            # Chaque réponse peut contenir audio_content (bytes)
+            if getattr(response, "audio_content", None):
+                yield response.audio_content
+
+    def speak_stream_voice_clone(self, voice_cloning_key: str, text_chunks: list, sample_rate_hz: int = 24000, output_wav_path: str | None = None) -> Generator[bytes, None, None]:
+        """Stream TTS en utilisant les paramètres de voice cloning.
+
+        Args:
+            voice_cloning_key: clé de clonage vocale fournie par l'API.
+            text_chunks: liste de chaînes représentant des fragments de texte "streamés".
+            sample_rate_hz: fréquence d'échantillonnage souhaitée pour l'export WAV.
+            output_wav_path: si fourni, écrira le flux collecté dans un fichier WAV.
+
+        Yields:
+            chunks d'octets audio renvoyés par l'API.
+        """
+        try:
+            voice_clone_params = texttospeech.VoiceCloneParams(
+                voice_cloning_key=voice_cloning_key
+            )
+
+            streaming_config = texttospeech.StreamingSynthesizeConfig(
+                voice=texttospeech.VoiceSelectionParams(
+                        language_code=getattr(self, 'tts_language_code', TTS_LANGUAGE_CODE),
+                        voice_clone=voice_clone_params,
+                    ),
+                streaming_audio_config=texttospeech.StreamingAudioConfig(
+                    audio_encoding=texttospeech.AudioEncoding.PCM,
+                    sample_rate_hertz=sample_rate_hz,
+                ),
+            )
+
+            config_request = texttospeech.StreamingSynthesizeRequest(
+                streaming_config=streaming_config
+            )
+
+            def request_generator():
+                yield config_request
+                for text in text_chunks:
+                    yield texttospeech.StreamingSynthesizeRequest(
+                        input=texttospeech.StreamingSynthesisInput(text=text)
+                    )
+
+            streaming_responses = self.tts_client.streaming_synthesize(request_generator())
+
+            audio_buffer = io.BytesIO()
+            for response in streaming_responses:
+                if getattr(response, "audio_content", None):
+                    audio_buffer.write(response.audio_content)
+                    yield response.audio_content
+
+            if output_wav_path:
+                with wave.open(output_wav_path, 'wb') as wav_file:
+                    wav_file.setnchannels(1)
+                    wav_file.setsampwidth(2)
+                    wav_file.setframerate(sample_rate_hz)
+                    wav_file.writeframes(audio_buffer.getvalue())
+        except Exception as e:
+            # Remonter l'erreur pour que l'appelant puisse la traiter/afficher
+            raise
+
+    def speak_stream_gemini(self, prompt: str | None, text_chunks: list[str], model: str | None = None, voice: str | None = None, locale: str | None = None, sample_rate_hz: int = 24000) -> Generator[bytes, None, None]:
+        """Utilise le mode streaming Gemini TTS (google-cloud-texttospeech >= 2.29.0).
+
+        Pour chaque chunk de réponse reçu, renvoie un WAV (bytes) jouable par le navigateur.
+
+        Args:
+            prompt: instructions de style (appliquées au premier chunk).
+            text_chunks: liste de fragments texte à synthétiser (simule un flux).
+            model: nom du modèle TTS (ex: "gemini-2.5-flash-tts").
+            voice: nom de la voix (ex: "leda").
+            locale: code locale (ex: "en-US").
+            sample_rate_hz: fréquence d'échantillonnage pour le WAV renvoyé.
+
+        Yields:
+            bytes: contenu d'un fichier WAV valide (RIFF) pour chaque chunk reçu.
+        """
+        client = self.tts_client
+
+        # Use persona defaults when parameters omitted
+        model = model or getattr(self, 'gemini_model', None)
+        voice = voice or getattr(self, 'gemini_voice', None)
+        locale = locale or getattr(self, 'gemini_locale', None)
+
+        # If no explicit prompt provided, craft a persona-aware prompt
+        if prompt is None:
+            name = getattr(self, 'persona_name', '').lower()
+            if 'donatella' in name:
+                prompt = "Please read the following French text in a female voice with an elegant Italian accent, refined and authoritative."
+            elif 'giorno' in name:
+                prompt = "Please read the following French text in a young male voice with an Italian accent, calm and determined."
+            else:
+                prompt  = "Please read the following French text in a male Italian voice, confident and direct."
+
+        config_request = texttospeech.StreamingSynthesizeRequest(
+            streaming_config=texttospeech.StreamingSynthesizeConfig(
+                voice=texttospeech.VoiceSelectionParams(
+                    name=voice,
+                    language_code=locale,
+                    model_name=model,
+                )
+            )
+        )
+
+        def request_generator():
+            yield config_request
+            for i, text in enumerate(text_chunks):
+                yield texttospeech.StreamingSynthesizeRequest(
+                    input=texttospeech.StreamingSynthesisInput(
+                        text=text,
+                        prompt=prompt if i == 0 else None,
+                    )
+                )
+
+        streaming_responses = client.streaming_synthesize(request_generator())
+
+        # Pour chaque réponse, envelopper response.audio_content (PCM) dans un WAV minimal
+        for response in streaming_responses:
+            if not getattr(response, "audio_content", None):
+                continue
+
+            pcm_bytes = response.audio_content
+
+            # Construire un WAV en mémoire pour ce chunk
+            buffer = BytesIO()
+            with wave.open(buffer, 'wb') as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)  # int16
+                wav_file.setframerate(sample_rate_hz)
+                wav_file.writeframes(pcm_bytes)
+
+            wav_bytes = buffer.getvalue()
+            yield wav_bytes
 
     def try_pipeline(self, audio_file_path="./audio_samples/question.mp3"):
         """Pipeline de test complet: STT -> LLM Streaming -> TTS Sentence-by-Sentence."""

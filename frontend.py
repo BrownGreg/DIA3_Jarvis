@@ -4,8 +4,9 @@ from io import BytesIO
 from pydub import AudioSegment
 from audio_recorder_streamlit import audio_recorder
 from chat_agent import ConversationAgent 
-from config import LLM_MODELS, TTS_AUDIO_ENCODING
+from config import LLM_MODELS, TTS_AUDIO_ENCODING, PERSONAS, USE_GEMINI_STREAMING
 import base64
+import os
 
 
 if "chat_agent" not in streamlit.session_state :
@@ -16,9 +17,29 @@ if "uploader_key" not in streamlit.session_state:
 
 
 def init_header():
+	# page config
 	streamlit.set_page_config(page_title="Jarvis", page_icon="🤖")
-	streamlit.title("🤖 Jarvis ton baron préféré !")
-	streamlit.write("Il est un peu enervé, fais attention à ce que tu racontes...")
+
+	# Ensure persona in session_state
+	if "persona" not in streamlit.session_state:
+		streamlit.session_state.persona = "Jarvis"
+
+	# Persona selector
+	persona_names = list(PERSONAS.keys())
+	selected = streamlit.selectbox("Choisis un capo", persona_names, index=persona_names.index(streamlit.session_state.persona) if streamlit.session_state.persona in persona_names else 0)
+	streamlit.session_state.persona = selected
+
+	# Display GIF (if file exists) and title
+	cols = streamlit.columns([1, 8])
+	gif_path = os.path.join("gifs", f"{streamlit.session_state.persona.lower()}.gif")
+	with cols[0]:
+		if os.path.exists(gif_path):
+			streamlit.image(gif_path, width=80)
+		else:
+			streamlit.write("")
+	with cols[1]:
+		display_name = PERSONAS.get(streamlit.session_state.persona, {}).get("display_name", streamlit.session_state.persona)
+		streamlit.markdown(f"### 🤖 {display_name} — ton capo préféré.e !")
 
 
 
@@ -41,6 +62,23 @@ def show_discussion_history(history_placeholder):
 
 def user_interface():
 	init_header()
+	# Apply persona settings to chat agent
+	persona_key = streamlit.session_state.get('persona', 'Jarvis')
+	persona_cfg = PERSONAS.get(persona_key, {})
+	agent = streamlit.session_state.chat_agent
+	agent.persona_name = persona_cfg.get('display_name', persona_key)
+	agent.persona_context = persona_cfg.get('context', agent.persona_context)
+	agent.tts_language_code = persona_cfg.get('tts_language_code', agent.tts_language_code)
+	agent.tts_voice_name = persona_cfg.get('tts_voice_name', agent.tts_voice_name)
+	agent.gemini_voice = persona_cfg.get('gemini_voice', agent.gemini_voice)
+	agent.gemini_locale = persona_cfg.get('gemini_locale', agent.gemini_locale)
+	agent.gemini_model = persona_cfg.get('gemini_model', agent.gemini_model)
+	# update system message in history to persona context
+	try:
+		if agent.history and isinstance(agent.history[0], dict):
+			agent.history[0]['content'] = agent.persona_context
+	except Exception:
+		pass
 	tab_chat, tab_voice = streamlit.tabs(["Chat texte", " Chat voix"])
 
 	with tab_chat:
@@ -145,31 +183,86 @@ def user_interface():
 				cumulative += sentence
 				placeholder_text.markdown(cumulative)
 
-				audio_bytes = streamlit.session_state.chat_agent.speak(sentence)
-				try:
-					segment = AudioSegment.from_file(BytesIO(audio_bytes), format=export_format)
-				except Exception:
-					segment = AudioSegment.from_raw(BytesIO(audio_bytes), sample_width=2, frame_rate=22050, channels=1)
-				audio_segments.append(segment)
+				agent = streamlit.session_state.chat_agent
+				# Prefer Gemini streaming TTS when enabled and persona provides a gemini voice
+				if USE_GEMINI_STREAMING and getattr(agent, 'gemini_voice', None):
+					try:
+						for chunk in agent.speak_stream_gemini(prompt=None, text_chunks=[sentence], model=getattr(agent, 'gemini_model', None), voice=getattr(agent, 'gemini_voice', None), locale=getattr(agent, 'gemini_locale', None)):
+							if not chunk:
+								continue
+							# enqueue WAV chunk for playback
+							b64_chunk = base64.b64encode(chunk).decode("utf-8")
+							data_url = f"data:audio/wav;base64,{b64_chunk}"
+							components.html(
+								f"""
+								<script>
+								  window.jarvisQueue = window.jarvisQueue || [];
+								  window.jarvisQueue.push('{data_url}');
+								  window.jarvisPlayNext && window.jarvisPlayNext();
+								</script>
+								""",
+								height=0,
+								width=0,
+								scrolling=False,
+							)
+							# collect for final export
+							try:
+								seg = AudioSegment.from_wav(BytesIO(chunk))
+								audio_segments.append(seg)
+							except Exception:
+								pass
+					except Exception as e:
+						# on error, fallback to synchronous TTS
+						audio_bytes = agent.speak(sentence)
+						try:
+							segment = AudioSegment.from_file(BytesIO(audio_bytes), format=export_format)
+						except Exception:
+							segment = AudioSegment.from_raw(BytesIO(audio_bytes), sample_width=2, frame_rate=22050, channels=1)
+						audio_segments.append(segment)
+						b64_audio = BytesIO()
+						segment.export(b64_audio, format=export_format)
+						b64_audio.seek(0)
+						b64_str = base64.b64encode(b64_audio.read()).decode("utf-8")
+						mime = f"audio/{export_format}"
+						components.html(
+							f"""
+							<script>
+							  window.jarvisQueue = window.jarvisQueue || [];
+							  window.jarvisQueue.push('data:{mime};base64,{b64_str}');
+							  window.jarvisPlayNext && window.jarvisPlayNext();
+							</script>
+							""",
+							height=0,
+							width=0,
+							scrolling=False,
+						)
+				else:
+					# fallback synchronous TTS
+					audio_bytes = agent.speak(sentence)
+					try:
+						segment = AudioSegment.from_file(BytesIO(audio_bytes), format=export_format)
+					except Exception:
+						segment = AudioSegment.from_raw(BytesIO(audio_bytes), sample_width=2, frame_rate=22050, channels=1)
+					audio_segments.append(segment)
 
-				# Enqueue chunk into the persistent queue (single audio element)
-				b64_audio = BytesIO()
-				segment.export(b64_audio, format=export_format)
-				b64_audio.seek(0)
-				b64_str = base64.b64encode(b64_audio.read()).decode("utf-8")
-				mime = f"audio/{export_format}"
-				components.html(
-					f"""
-					<script>
-					  window.jarvisQueue = window.jarvisQueue || [];
-					  window.jarvisQueue.push('data:{mime};base64,{b64_str}');
-					  window.jarvisPlayNext && window.jarvisPlayNext();
-					</script>
-					""",
-					height=0,
-					width=0,
-					scrolling=False,
-				)
+					# Enqueue chunk into the persistent queue (single audio element)
+					b64_audio = BytesIO()
+					segment.export(b64_audio, format=export_format)
+					b64_audio.seek(0)
+					b64_str = base64.b64encode(b64_audio.read()).decode("utf-8")
+					mime = f"audio/{export_format}"
+					components.html(
+						f"""
+						<script>
+						  window.jarvisQueue = window.jarvisQueue || [];
+						  window.jarvisQueue.push('data:{mime};base64,{b64_str}');
+						  window.jarvisPlayNext && window.jarvisPlayNext();
+						</script>
+						""",
+						height=0,
+						width=0,
+						scrolling=False,
+					)
 				chunk_idx += 1
 
 			if audio_segments:
