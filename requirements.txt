@@ -4,3 +4,6 @@ python-dotenv
 discord.py
 pydub
 google-cloud-texttospeech
+google-generativeai
+gTTS
+audio-recorder-streamlit
