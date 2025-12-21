@@ -1,6 +1,17 @@
 groq
 python-dotenv
+<<<<<<< HEAD
 streamlit
 discord.py
 google-genai
 pydub
+=======
+discord.py
+pydub
+google-cloud-texttospeech
+google-generativeai
+google-cloud-aiplatform>=1.70.0
+gTTS
+audio-recorder-streamlit
+streamlit-mic-recorder
+>>>>>>> feature/conversational_ai

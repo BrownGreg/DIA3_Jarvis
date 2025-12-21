@@ -2,7 +2,7 @@ import os
 import discord
 from discord import app_commands
 from dotenv import load_dotenv
-from conversation_agent import ConversationAgent 
+from chat_agent import ConversationAgent 
 
 class DiscordBot(discord.Client):
     def __init__(self, conversation_agent):
