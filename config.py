@@ -56,6 +56,7 @@ def _extract_description(block: str | None) -> str | None:
     if not block:
         return None
     import re
+    # regex qui extrait le texte sous description avec indentation
     m = re.search(r"description:\s*\|\s*\n(?P<desc>(?:[ \t].*\n?)+)", block, re.M)
     if m:
         # Nettoie les indentations en enlevant une tabulation ou 1-4 espaces en début de ligne
@@ -82,18 +83,21 @@ VISION_MODELS = [
 ]
 
 STT_MODEL = "whisper-large-v3"
-LLM_MODEL = LLM_MODELS[0]
+LLM_MODEL = LLM_MODELS[0] 
+# Limite de tokens pour réduire la longueur des réponses streamées
+LLM_MAX_COMPLETION_TOKENS = 256
 
 # Paramètres TTS par défaut (utilisés par Jarvis par défaut)
-TTS_LANGUAGE_CODE = "it-IT"
-TTS_VOICE_NAME = "it-IT-Standard-D"
+TTS_LANGUAGE_CODE = "fr-FR"
+TTS_VOICE_NAME = "fr-FR-Neural2-B"
 TTS_AUDIO_ENCODING = "MP3"
 
-# Streaming Gemini (optionnel) - désactivé par défaut pour préférer Chirp HD
-USE_GEMINI_STREAMING = False
-GEMINI_MODEL = "gemini-2.5-flash-tts"
-GEMINI_VOICE = "leda" # Voix par défaut pour Gemini (conserve si nécessaire)
-GEMINI_LOCALE = "it-IT"
+# Streaming Gemini (optionnel) - activé pour utiliser Gemini 2.5 Pro TTS
+USE_GEMINI_STREAMING = True
+# Modèle/voix cible souhaités (voir demande utilisateur)
+GEMINI_MODEL = "gemini-2.5-pro-tts"
+GEMINI_VOICE = "Charon"  # Voix par défaut pour Gemini
+GEMINI_LOCALE = "en-US"
 
 # Personas definitions
 # Jarvis a un contexte qui se trouve avant le premier '---' dans context.txt
@@ -124,31 +128,36 @@ PERSONAS = {
         # tout le YAML structuré comme message système.
         "context": _extract_description(_PERSONA_CONTEXTS.get("Jarvis", jarvis_default_context)),
         "tts_language_code": "fr-FR",
-        # Voix Chirp 3 HD demandée par l'équipe (locale française)
-        "tts_voice_name": "fr-FR-Chirp3-HD-Charon",
+        "tts_voice_name": "fr-FR-Neural2-B",
         "gemini_voice": "Charon",
         "gemini_locale": "fr-FR",
         "gemini_model": GEMINI_MODEL,
+        "gemini_tts_voice_name": "fr-FR-Neural2-B",
+        "gender": "male",
     },
     "Donatella": {
         "display_name": "Donatella",
         # Le CONTEXTE est chargé ici si la clé 'Donatella' existe dans _PERSONA_CONTEXTS
         "context": _extract_description(_PERSONA_CONTEXTS.get("Donatella", None)),
         "tts_language_code": "fr-FR",
-        "tts_voice_name": "fr-FR-Chirp3-HD-Callirrhoe",
-        "gemini_voice": "Callirrhoe",
+        "tts_voice_name": "fr-FR-Neural2-A",
+        "gemini_voice": "Gacrux",
         "gemini_locale": "fr-FR",
         "gemini_model": GEMINI_MODEL,
+        "gemini_tts_voice_name": "fr-FR-Neural2-A",
+        "gender": "female",
     },
     "Giorno": {
         "display_name": "Giorno",
         # Le CONTEXTE est chargé ici si la clé 'Giorno' existe dans _PERSONA_CONTEXTS
         "context": _extract_description(_PERSONA_CONTEXTS.get("Giorno", None)),
         "tts_language_code": "fr-FR",
-        "tts_voice_name": "fr-FR-Chirp3-HD-Sadaltager",
-        "gemini_voice": "Sadaltager",
+        "tts_voice_name": "fr-FR-Neural2-D",
+        "gemini_voice": "Umbriel",
         "gemini_locale": "fr-FR",
         "gemini_model": GEMINI_MODEL,
+        "gemini_tts_voice_name": "fr-FR-Neural2-D",
+        "gender": "male",
     },
 }
 

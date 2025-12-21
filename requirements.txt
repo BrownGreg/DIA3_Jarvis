@@ -5,5 +5,7 @@ discord.py
 pydub
 google-cloud-texttospeech
 google-generativeai
+google-cloud-aiplatform>=1.70.0
 gTTS
 audio-recorder-streamlit
+streamlit-mic-recorder
