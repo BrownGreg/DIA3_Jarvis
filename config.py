@@ -70,29 +70,21 @@ def _extract_description(block: str | None) -> str | None:
 
 # Modèles LLM et Vision... (Aucun changement)
 LLM_MODELS = [
-<<<<<<< HEAD
-	"llama-3.1-8b-instant",
-	"openai/gpt-oss-20b",
-	"openai/gpt-oss-120b",
-	"llama-3.3-70b-versatile",
-	"moonshotai/kimi-k2-instruct-0905",
-	"whisper/whisper-large-v3",
-]
-=======
     "llama-3.1-8b-instant",
     "openai/gpt-oss-20b",
     "openai/gpt-oss-120b",
     "llama-3.3-70b-versatile",
     "moonshotai/kimi-k2-instruct-0905",
+    "whisper/whisper-large-v3",
 ]
 
 VISION_MODELS = [
     "meta-llama/llama-4-scout-17b-16e-instruct",
-    "meta-llama/llama-4-maverick-17b-128e-instruct"
+    "meta-llama/llama-4-maverick-17b-128e-instruct",
 ]
 
 STT_MODEL = "whisper-large-v3"
-LLM_MODEL = LLM_MODELS[0] 
+LLM_MODEL = LLM_MODELS[0]
 # Limite de tokens pour réduire la longueur des réponses streamées
 LLM_MAX_COMPLETION_TOKENS = 256
 
@@ -175,4 +167,3 @@ if not _PERSONA_CONTEXTS:
     print("AVERTISSEMENT: Aucune persona n'a été chargée depuis context.txt.")
 else:
     print(f"Contextes chargés pour: {list(_PERSONA_CONTEXTS.keys())}")
->>>>>>> feature/conversational_ai
